@@ -12,7 +12,7 @@ const TEAM_COLORS := [
 ]
 const TEAM_NAMES := ["RED", "BLUE", "PURPLE", "GOLD", "GREEN", "ORANGE"]
 const EVENT_LABELS := ["ON_HIT", "ON_WALL", "EVERY_3S", "ON_DAMAGE", "ON_DESTROY"]
-const ACTION_LABELS := [
+const ACTIONS := [
 	"SHOOT",
 	"DROP_BOMB",
 	"RANDOM_BLAST",
@@ -37,15 +37,20 @@ var selected_id := -1
 var background := Color("#0d1422")
 var outline := Color("#425578")
 var project_file := "user://bounceforge_project.json"
-var ui := {}
+
+var roster_label: Label
+var selected_label: Label
+var status_label: Label
+var speed_label: Label
+var script_label: Label
 
 func _ready() -> void:
 	randomize()
 	_build_ui()
 	_seed_demo()
-	_select_ball(balls[0].id)
-	_refresh_roster()
-	_refresh_script_panel()
+	if not balls.is_empty():
+		_select_ball(balls[0].id)
+	_update_roster()
 	queue_redraw()
 
 func _build_ui() -> void:
@@ -54,15 +59,15 @@ func _build_ui() -> void:
 	add_child(root)
 
 	var title := Label.new()
-	title.position = Vector2(24, 18)
+	title.position = Vector2(24, 16)
 	title.text = "BounceForge Arena"
-	title.add_theme_font_size_override("font_size", 26)
+	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", Color("#edf5ff"))
 	root.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.position = Vector2(260, 29)
-	subtitle.text = "DVD physics + programmable weapons + chaotic battles"
+	subtitle.position = Vector2(275, 28)
+	subtitle.text = "physics sandbox • programmable characters • chaotic battles"
 	subtitle.add_theme_color_override("font_color", Color("#8da7d5"))
 	root.add_child(subtitle)
 
@@ -73,26 +78,27 @@ func _build_ui() -> void:
 	root.add_child(panel)
 
 	var vbox := VBoxContainer.new()
-	vbox.position = Vector2(14, 16)
+	vbox.position = Vector2(14, 18)
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
-	var ui_title := Label.new(); ui_title.text = "SIMULATION"; ui_title.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(ui_title)
+	var sim_title := Label.new(); sim_title.text = "SIMULATION"; sim_title.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(sim_title)
 	var start_btn := Button.new(); start_btn.text = "START"; start_btn.pressed.connect(_start_simulation); vbox.add_child(start_btn)
 	var pause_btn := Button.new(); pause_btn.text = "PAUSE"; pause_btn.pressed.connect(_pause_simulation); vbox.add_child(pause_btn)
+	var stop_btn := Button.new(); stop_btn.text = "STOP"; stop_btn.pressed.connect(_stop_simulation); vbox.add_child(stop_btn)
 	var restart_btn := Button.new(); restart_btn.text = "RESTART"; restart_btn.pressed.connect(_restart_simulation); vbox.add_child(restart_btn)
 	var save_btn := Button.new(); save_btn.text = "SAVE PROJECT"; save_btn.pressed.connect(_save_project); vbox.add_child(save_btn)
 	var load_btn := Button.new(); load_btn.text = "LOAD PROJECT"; load_btn.pressed.connect(_load_project); vbox.add_child(load_btn)
-	ui.status_label = Label.new(); ui.status_label.text = "READY"; ui.status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; ui.status_label.add_theme_color_override("font_color", Color("#d4def8")); vbox.add_child(ui.status_label)
+	status_label = Label.new(); status_label.text = "READY"; status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; status_label.add_theme_color_override("font_color", Color("#d4def8")); vbox.add_child(status_label)
 
 	var sep1 := HSeparator.new(); vbox.add_child(sep1)
 	var speed_title := Label.new(); speed_title.text = "SIMULATION SPEED"; vbox.add_child(speed_title)
 	var speed_box := HBoxContainer.new(); speed_box.add_theme_constant_override("separation", 5); vbox.add_child(speed_box)
 	for s in [0.25, 0.5, 1.0, 2.0]:
-		var b := Button.new(); b.text = str(s) + "x"; b.custom_minimum_size.x = 58; b.pressed.connect(func(): _set_speed(s)); speed_box.add_child(b)
-	ui.speed_label = Label.new(); ui.speed_label.text = "Speed: 1.0x"; ui.speed_label.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(ui.speed_label)
+		var b := Button.new(); b.text = str(s) + "x"; b.custom_minimum_size.x = 56; b.pressed.connect(func(): _set_speed(s)); speed_box.add_child(b)
+	speed_label = Label.new(); speed_label.text = "Speed: 1.0x"; speed_label.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(speed_label)
 
 	var sep2 := HSeparator.new(); vbox.add_child(sep2)
 	var creator_title := Label.new(); creator_title.text = "CHARACTER CREATOR"; creator_title.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(creator_title)
@@ -106,12 +112,12 @@ func _build_ui() -> void:
 	var sep3 := HSeparator.new(); vbox.add_child(sep3)
 	var block_title := Label.new(); block_title.text = "BLOCK EDITOR"; block_title.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(block_title)
 	var event_menu := OptionButton.new(); for label in EVENT_LABELS: event_menu.add_item(label); event_menu.select(0); vbox.add_child(event_menu)
-	var action_menu := OptionButton.new(); for label in ACTION_LABELS: action_menu.add_item(label); action_menu.select(0); vbox.add_child(action_menu)
+	var action_menu := OptionButton.new(); for label in ACTIONS: action_menu.add_item(label); action_menu.select(0); vbox.add_child(action_menu)
 	var add_block_btn := Button.new(); add_block_btn.text = "ADD BEHAVIOR BLOCK"; add_block_btn.pressed.connect(func(): _attach_behavior(event_menu.get_item_text(event_menu.selected), action_menu.get_item_text(action_menu.selected))); vbox.add_child(add_block_btn)
-	ui.script_label = Label.new(); ui.script_label.text = "Selected script: none"; ui.script_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; ui.script_label.add_theme_color_override("font_color", Color("#ccd8f1")); vbox.add_child(ui.script_label)
+	script_label = Label.new(); script_label.text = "Selected script: none"; script_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; script_label.add_theme_color_override("font_color", Color("#ccd8f1")); vbox.add_child(script_label)
 
-	ui.roster_label = Label.new(); ui.roster_label.position = Vector2(30, 110); ui.roster_label.add_theme_color_override("font_color", Color("#b9c9eb")); root.add_child(ui.roster_label)
-	ui.selected_label = Label.new(); ui.selected_label.position = Vector2(30, 70); ui.selected_label.add_theme_color_override("font_color", Color("#ffe39b")); root.add_child(ui.selected_label)
+	roster_label = Label.new(); roster_label.position = Vector2(30, 110); roster_label.add_theme_color_override("font_color", Color("#b9c9eb")); root.add_child(roster_label)
+	selected_label = Label.new(); selected_label.position = Vector2(30, 70); selected_label.add_theme_color_override("font_color", Color("#ffe39b")); root.add_child(selected_label)
 
 func _panel_style(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
 	var box := StyleBoxFlat.new()
@@ -140,8 +146,8 @@ func _add_character_from_ui(name_text: String, team_index: int, template_text: S
 		name_value = "Contestant " + str(next_id)
 	_add_character(name_value, team_index, template_text)
 	_select_ball(balls[-1].id)
-	_refresh_roster()
-	_refresh_script_panel()
+	_update_roster()
+	_update_script_panel()
 	queue_redraw()
 
 func _add_character(name_value: String, team_index: int, template_text: String) -> void:
@@ -199,19 +205,20 @@ func _apply_preset(ball: Dictionary, template_text: String) -> void:
 
 func _select_ball(id: int) -> void:
 	selected_id = id
-	_refresh_script_panel()
-	_refresh_roster()
+	_update_roster()
+	_update_script_panel()
 
 func _attach_behavior(event_name: String, action_name: String) -> void:
 	var ball := _get_selected_ball()
 	if ball.is_empty():
-		ui.status_label.text = "Select a ball first"; return
+		status_label.text = "Select a ball first"
+		return
 	if not ball.script.has(event_name):
 		ball.script[event_name] = []
 	ball.script[event_name].append(action_name)
-	ui.status_label.text = "Added %s -> %s" % [event_name, action_name]
-	_refresh_script_panel()
-	_refresh_roster()
+	status_label.text = "Added %s -> %s" % [event_name, action_name]
+	_update_script_panel()
+	_update_roster()
 
 func _get_selected_ball() -> Dictionary:
 	for ball in balls:
@@ -219,47 +226,50 @@ func _get_selected_ball() -> Dictionary:
 			return ball
 	return {}
 
-func _refresh_roster() -> void:
-	var roster_lines := ["ROSTER"]
+func _update_roster() -> void:
+	var lines := ["ROSTER"]
 	for ball in balls:
 		var marker := "  "
 		if ball.id == selected_id:
 			marker = "> "
-		roster_lines.append(marker + str(ball.id) + "  " + ball.name + "  [" + TEAM_NAMES[ball.team] + "]  HP " + str(int(ball.health)))
-	ui.roster_label.text = "\n".join(roster_lines)
+		lines.append(marker + str(ball.id) + "  " + ball.name + "  [" + TEAM_NAMES[ball.team] + "]  HP " + str(int(ball.health)))
+	roster_label.text = "\n".join(lines)
 	var selected := _get_selected_ball()
 	if selected.is_empty():
-		ui.selected_label.text = "No selection"
-		ui.script_label.text = "Selected script: none"
+		selected_label.text = "No selection"
+		script_label.text = "Selected script: none"
 	else:
-		ui.selected_label.text = selected.name + " • " + TEAM_NAMES[selected.team] + " • HP " + str(int(selected.health)) + " • Dmg " + str(int(selected.weapon_damage))
-		_refresh_script_panel()
+		selected_label.text = selected.name + " • " + TEAM_NAMES[selected.team] + " • HP " + str(int(selected.health)) + " • Dmg " + str(int(selected.weapon_damage))
+		_update_script_panel()
 
-func _refresh_script_panel() -> void:
+func _update_script_panel() -> void:
 	var ball := _get_selected_ball()
 	if ball.is_empty():
-		ui.script_label.text = "Selected script: none"
+		script_label.text = "Selected script: none"
 		return
 	var parts: Array[String] = []
 	for event_name in EVENT_LABELS:
 		if ball.script.has(event_name) and ball.script[event_name].size() > 0:
 			parts.append(event_name + ": " + ", ".join(ball.script[event_name]))
-	ui.script_label.text = "Selected script: " + (" | ".join(parts) if parts.size() > 0 else "empty")
+	script_label.text = "Selected script: " + (" | ".join(parts) if not parts.is_empty() else "empty")
 
 func _start_simulation() -> void:
 	running = true
-	ui.status_label.text = "Simulation running"
+	status_label.text = "Simulation running"
 
 func _pause_simulation() -> void:
-	running = !running
-	ui.status_label.text = "Simulation paused" if !running else "Simulation running"
+	running = not running
+	status_label.text = "Simulation paused" if not running else "Simulation running"
+
+func _stop_simulation() -> void:
+	running = false
+	for ball in balls:
+		ball.vel = Vector2.ZERO
+	status_label.text = "Simulation stopped"
 
 func _restart_simulation() -> void:
 	for ball in balls:
-		ball.pos = Vector2(
-			randf_range(ARENA.position.x + 60, ARENA.end.x - 60),
-			randf_range(ARENA.position.y + 60, ARENA.end.y - 60)
-		)
+		ball.pos = Vector2(randf_range(ARENA.position.x + 60, ARENA.end.x - 60), randf_range(ARENA.position.y + 60, ARENA.end.y - 60))
 		ball.vel = Vector2(randf_range(90.0, 180.0), randf_range(-120.0, 120.0))
 		if randf() < 0.5:
 			ball.vel.x *= -1.0
@@ -270,13 +280,13 @@ func _restart_simulation() -> void:
 	projectiles.clear()
 	effects.clear()
 	running = false
-	ui.status_label.text = "Simulation reset"
-	_refresh_roster()
+	status_label.text = "Simulation reset"
+	_update_roster()
 	queue_redraw()
 
 func _set_speed(s: float) -> void:
 	time_scale = s
-	ui.speed_label.text = "Speed: " + str(s) + "x"
+	speed_label.text = "Speed: " + str(s) + "x"
 
 func _save_project() -> void:
 	var payload := {"background": background.to_html(), "outline": outline.to_html(), "balls": []}
@@ -297,19 +307,19 @@ func _save_project() -> void:
 	var file := FileAccess.open(project_file, FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(payload))
-		ui.status_label.text = "Project saved to user://bounceforge_project.json"
+		status_label.text = "Project saved to user://bounceforge_project.json"
 	else:
-		ui.status_label.text = "Could not save project"
+		status_label.text = "Could not save project"
 
 func _load_project() -> void:
 	if not FileAccess.file_exists(project_file):
-		ui.status_label.text = "No saved project found"; return
+		status_label.text = "No saved project found"; return
 	var file := FileAccess.open(project_file, FileAccess.READ)
 	if not file:
-		ui.status_label.text = "Could not open saved project"; return
+		status_label.text = "Could not open saved project"; return
 	var payload = JSON.parse_string(file.get_as_text())
 	if typeof(payload) != TYPE_DICTIONARY:
-		ui.status_label.text = "Saved project invalid"; return
+		status_label.text = "Saved project invalid"; return
 	if payload.has("background"):
 		background = Color(payload["background"])
 	if payload.has("outline"):
@@ -337,9 +347,9 @@ func _load_project() -> void:
 		balls.append(ball)
 		next_id += 1
 	selected_id = balls[0].id if not balls.is_empty() else -1
-	ui.status_label.text = "Project loaded"
-	_refresh_roster()
-	_refresh_script_panel()
+	status_label.text = "Project loaded"
+	_update_roster()
+	_update_script_panel()
 	queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -361,7 +371,6 @@ func _simulate(dt: float) -> void:
 		ball.cooldown = max(0.0, ball.cooldown - dt)
 		ball.shield = max(0.0, ball.shield - dt)
 		ball.pos += ball.vel * dt
-
 		if ball.pos.x - ball.radius < ARENA.position.x:
 			ball.pos.x = ARENA.position.x + ball.radius
 			ball.vel.x = abs(ball.vel.x)
@@ -404,7 +413,6 @@ func _simulate(dt: float) -> void:
 		if projectile.life <= 0.0:
 			_effect(projectile.pos, "blast", Color("#ffd06e"), 0.25)
 	projectiles = projectiles.filter(func(item): return item.life > 0.0)
-
 	for effect in effects:
 		effect.life -= dt
 	effects = effects.filter(func(item): return item.life > 0.0)
@@ -414,8 +422,8 @@ func _simulate(dt: float) -> void:
 	balls = balls.filter(func(item): return item.health > 0.0)
 	if selected_id != -1 and _get_selected_ball().is_empty():
 		selected_id = balls[0].id if not balls.is_empty() else -1
-	_refresh_roster()
-	_refresh_script_panel()
+	_update_roster()
+	_update_script_panel()
 
 func _resolve_ball_collision(a: Dictionary, b: Dictionary) -> void:
 	var diff := a.pos - b.pos
