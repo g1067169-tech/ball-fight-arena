@@ -7,9 +7,10 @@ const TEAM_COLORS := [
 	Color("#4ca3ff"),
 	Color("#ae7cff"),
 	Color("#ffc857"),
-	Color("#53d68c")
+	Color("#53d68c"),
+	Color("#ff9f43")
 ]
-const TEAM_NAMES := ["RED", "BLUE", "PURPLE", "GOLD", "GREEN"]
+const TEAM_NAMES := ["RED", "BLUE", "PURPLE", "GOLD", "GREEN", "ORANGE"]
 const EVENT_LABELS := ["ON_HIT", "ON_WALL", "EVERY_3S", "ON_DAMAGE", "ON_DESTROY"]
 const ACTION_LABELS := [
 	"SHOOT",
@@ -20,7 +21,9 @@ const ACTION_LABELS := [
 	"SPEED_UP",
 	"SUMMON_MINION",
 	"TELEPORT",
-	"HEAL"
+	"HEAL",
+	"PUSH_AWAY",
+	"SET_RANDOM_VELOCITY"
 ]
 
 var balls: Array = []
@@ -33,7 +36,6 @@ var selected_id := -1
 var background := Color("#0d1422")
 var outline := Color("#425578")
 var project_file := "user://bounceforge_project.json"
-
 var ui := {}
 
 func _ready() -> void:
@@ -58,14 +60,14 @@ func _build_ui() -> void:
 	root.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.position = Vector2(240, 28)
-	subtitle.text = "Physics sandbox • programmable characters • weaponized chaos"
+	subtitle.position = Vector2(265, 29)
+	subtitle.text = "DVD physics + programmable weapons + chaotic battles"
 	subtitle.add_theme_color_override("font_color", Color("#8da7d5"))
 	root.add_child(subtitle)
 
 	var panel := Panel.new()
 	panel.position = Vector2(PANEL_X, 14)
-	panel.size = Vector2(260, 720)
+	panel.size = Vector2(270, 720)
 	panel.add_theme_stylebox_override("panel", _panel_style(Color("#171e2f"), Color("#2a3860"), 12))
 	root.add_child(panel)
 
@@ -76,11 +78,7 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 8)
 	panel.add_child(vbox)
 
-	var ui_title := Label.new()
-	ui_title.text = "SIMULATION"
-	ui_title.add_theme_color_override("font_color", Color("#79d6ff"))
-	vbox.add_child(ui_title)
-
+	var ui_title := Label.new(); ui_title.text = "SIMULATION"; ui_title.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(ui_title)
 	var start_btn := Button.new(); start_btn.text = "START"; start_btn.pressed.connect(_start_simulation); vbox.add_child(start_btn)
 	var pause_btn := Button.new(); pause_btn.text = "PAUSE"; pause_btn.pressed.connect(_pause_simulation); vbox.add_child(pause_btn)
 	var restart_btn := Button.new(); restart_btn.text = "RESTART"; restart_btn.pressed.connect(_restart_simulation); vbox.add_child(restart_btn)
@@ -89,10 +87,10 @@ func _build_ui() -> void:
 	ui.status_label = Label.new(); ui.status_label.text = "READY"; ui.status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; ui.status_label.add_theme_color_override("font_color", Color("#d4def8")); vbox.add_child(ui.status_label)
 
 	var sep1 := HSeparator.new(); vbox.add_child(sep1)
-	var speed_title := Label.new(); speed_title.text = "Speed"; vbox.add_child(speed_title)
+	var speed_title := Label.new(); speed_title.text = "SIMULATION SPEED"; vbox.add_child(speed_title)
 	var speed_box := HBoxContainer.new(); speed_box.add_theme_constant_override("separation", 5); vbox.add_child(speed_box)
 	for s in [0.25, 0.5, 1.0, 2.0]:
-		var b := Button.new(); b.text = str(s) + "x"; b.custom_minimum_size.x = 55; b.pressed.connect(func(): _set_speed(s)); speed_box.add_child(b)
+		var b := Button.new(); b.text = str(s) + "x"; b.custom_minimum_size.x = 58; b.pressed.connect(func(): _set_speed(s)); speed_box.add_child(b)
 	ui.speed_label = Label.new(); ui.speed_label.text = "Speed: 1.0x"; ui.speed_label.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(ui.speed_label)
 
 	var sep2 := HSeparator.new(); vbox.add_child(sep2)
@@ -112,10 +110,10 @@ func _build_ui() -> void:
 	ui.script_label = Label.new(); ui.script_label.text = "Selected script: none"; ui.script_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; ui.script_label.add_theme_color_override("font_color", Color("#ccd8f1")); vbox.add_child(ui.script_label)
 
 	ui.roster_label = Label.new(); ui.roster_label.position = Vector2(30, 110); ui.roster_label.add_theme_color_override("font_color", Color("#b9c9eb")); root.add_child(ui.roster_label)
-	ui.selected_label = Label.new(); ui.selected_label.position = Vector2(30, 72); ui.selected_label.add_theme_color_override("font_color", Color("#ffe39b")); root.add_child(ui.selected_label)
+	ui.selected_label = Label.new(); ui.selected_label.position = Vector2(30, 70); ui.selected_label.add_theme_color_override("font_color", Color("#ffe39b")); root.add_child(ui.selected_label)
 
 func _panel_style(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
-	var box := StyleBoxFlat.new();
+	var box := StyleBoxFlat.new()
 	box.bg_color = bg
 	box.border_color = border
 	box.border_width_left = 1
@@ -191,7 +189,7 @@ func _apply_preset(ball: Dictionary, template_text: String) -> void:
 		"Guardian":
 			ball.script["EVERY_3S"] = ["CREATE_SHIELD"]
 			ball.script["ON_DAMAGE"] = ["CREATE_SHIELD"]
-		_: 
+		_:
 			ball.script["ON_HIT"] = ["SPEED_UP"]
 			ball.script["ON_WALL"] = ["SPEED_UP"]
 
@@ -258,7 +256,7 @@ func _restart_simulation() -> void:
 			randf_range(ARENA.position.x + 60, ARENA.end.x - 60),
 			randf_range(ARENA.position.y + 60, ARENA.end.y - 60)
 		)
-		ball.vel = Vector2(randf_range(90.0, 180.0), randf_range(-120.0, 120.0));
+		ball.vel = Vector2(randf_range(90.0, 180.0), randf_range(-120.0, 120.0))
 		if randf() < 0.5:
 			ball.vel.x *= -1.0
 		ball.health = ball.max_health
@@ -291,7 +289,7 @@ func _save_project() -> void:
 		})
 	var file := FileAccess.open(project_file, FileAccess.WRITE)
 	if file:
-		file.store_string(JSON.stringify(payload, " "))
+		file.store_string(JSON.stringify(payload))
 		ui.status_label.text = "Project saved to user://bounceforge_project.json"
 	else:
 		ui.status_label.text = "Could not save project"
@@ -304,7 +302,7 @@ func _load_project() -> void:
 		ui.status_label.text = "Could not open saved project"; return
 	var payload = JSON.parse_string(file.get_as_text())
 	if typeof(payload) != TYPE_DICTIONARY:
-		ui.status_label.text = "Saved project was invalid"; return
+		ui.status_label.text = "Saved project invalid"; return
 	if payload.has("background"):
 		background = Color(payload["background"])
 	if payload.has("outline"):
@@ -387,12 +385,11 @@ func _simulate(dt: float) -> void:
 				break
 		if projectile.life <= 0.0:
 			_effect(projectile.pos, "blast", Color("#ffd06e"), 0.25)
-		projectiles = projectiles.filter(func(item): return item.life > 0.0)
+	projectiles = projectiles.filter(func(item): return item.life > 0.0)
 
 	for effect in effects:
 		effect.life -= dt
-	if not effects.is_empty():
-		effects = effects.filter(func(item): return item.life > 0.0)
+	effects = effects.filter(func(item): return item.life > 0.0)
 	for ball in balls:
 		if ball.health <= 0.0:
 			_trigger_behavior(ball, "ON_DESTROY")
@@ -438,10 +435,8 @@ func _execute_action(ball: Dictionary, action_name: String) -> void:
 		"DROP_BOMB":
 			_effect(ball.pos + Vector2(randf_range(-30.0, 30.0), randf_range(-30.0, 30.0)), "bomb", Color("#ffb14c"), 0.45)
 			for other in balls:
-				if other.id == ball.id:
-					continue
-				if other.team == ball.team:
-					continue
+				if other.id == ball.id: continue
+				if other.team == ball.team: continue
 				if ball.pos.distance_to(other.pos) <= 75.0:
 					_apply_damage(other, 16.0, ball.id)
 		"RANDOM_BLAST":
@@ -460,6 +455,14 @@ func _execute_action(ball: Dictionary, action_name: String) -> void:
 			ball.pos = Vector2(randf_range(ARENA.position.x + 40, ARENA.end.x - 40), randf_range(ARENA.position.y + 40, ARENA.end.y - 40))
 		"HEAL":
 			ball.health = min(ball.max_health, ball.health + 20.0)
+		"PUSH_AWAY":
+			for other in balls:
+				if other.id == ball.id: continue
+				if other.team == ball.team: continue
+				var dir := (other.pos - ball.pos).normalized()
+				other.vel += dir * 90.0
+		"SET_RANDOM_VELOCITY":
+			ball.vel = Vector2(randf_range(-220.0, 220.0), randf_range(-220.0, 220.0))
 		_:
 			pass
 
@@ -535,9 +538,8 @@ func _apply_damage(ball: Dictionary, amount: float, attacker_id: int = -1) -> vo
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, Vector2(1180, 760)), Color("#0a101c"))
 	draw_rect(ARENA, background, true)
-	draw_rect(ARENA, Color(0,0,0,0), false)
-	draw_rect(ARENA.grow_indented(-2), color_with_alpha(outline, 0.25), false)
-	draw_rect(ARENA, Color(0,0,0,0), false)
+	draw_rect(ARENA, Color(0, 0, 0, 0), false)
+	draw_rect(Rect2(ARENA.position + Vector2(2, 2), Vector2(ARENA.size.x - 4, ARENA.size.y - 4)), color_with_alpha(outline, 0.25), false)
 
 	for ball in balls:
 		var base_color := TEAM_COLORS[ball.team % TEAM_COLORS.size()]
@@ -556,9 +558,8 @@ func _draw() -> void:
 		draw_line(projectile.pos, projectile.pos - projectile.vel.normalized() * 10.0, Color("#f6ffb3"), 1.5)
 
 	for effect in effects:
-		var scale := 1.0 - (effect.life / max(0.01, effect.life + 0.1))
-		var radius = 10.0 + scale * 32.0
-		draw_arc(effect.pos, radius, 0.0, TAU, 24, color_with_alpha(effect.color, 0.8), 2.5)
+		var radius := 12.0 + (1.0 - effect.life / 0.8) * 26.0
+		draw_arc(effect.pos, radius, 0.0, TAU, 18, color_with_alpha(effect.color, 0.8), 2.5)
 
 func color_with_alpha(color: Color, alpha: float) -> Color:
 	return Color(color.r, color.g, color.b, alpha)
