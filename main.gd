@@ -1,254 +1,564 @@
 extends Node2D
-## BounceForge Arena - a small, playable foundation for programmable physics battles.
-## Entities are intentionally simple: position + velocity + event-driven behavior blocks.
 
-const ARENA := Rect2(24, 86, 842, 650)
-const PANEL_X := 886.0
-const COLORS := [Color("#ff5572"), Color("#55a7ff"), Color("#a877ff"), Color("#ffc857"), Color("#55d69a")]
+const ARENA := Rect2(24, 90, 850, 610)
+const PANEL_X := 900.0
+const TEAM_COLORS := [
+	Color("#ff5f7a"),
+	Color("#4ca3ff"),
+	Color("#ae7cff"),
+	Color("#ffc857"),
+	Color("#53d68c")
+]
 const TEAM_NAMES := ["RED", "BLUE", "PURPLE", "GOLD", "GREEN"]
+const EVENT_LABELS := ["ON_HIT", "ON_WALL", "EVERY_3S", "ON_DAMAGE", "ON_DESTROY"]
+const ACTION_LABELS := [
+	"SHOOT",
+	"DROP_BOMB",
+	"RANDOM_BLAST",
+	"SPLIT",
+	"CREATE_SHIELD",
+	"SPEED_UP",
+	"SUMMON_MINION",
+	"TELEPORT",
+	"HEAL"
+]
 
-var balls: Array[Dictionary] = []
-var projectiles: Array[Dictionary] = []
-var effects: Array[Dictionary] = []
+var balls: Array = []
+var projectiles: Array = []
+var effects: Array = []
 var running := false
 var time_scale := 1.0
-var elapsed := 0.0
 var next_id := 1
 var selected_id := -1
-var background := Color("#101522")
-var outline := Color("#41516e")
-var status_label: Label
-var roster_label: Label
-var selected_label: Label
-var speed_label: Label
-var behavior_label: Label
-var team_option: OptionButton
-var behavior_option: OptionButton
-var name_edit: LineEdit
-var add_button: Button
-var pause_button: Button
-var start_button: Button
-var color_bg: ColorPickerButton
-var color_outline: ColorPickerButton
+var background := Color("#0d1422")
+var outline := Color("#425578")
+var project_file := "user://bounceforge_project.json"
+
+var ui := {}
 
 func _ready() -> void:
+	randomize()
 	_build_ui()
-	_add_ball(0, "Red Rocket", "SHOOT_ON_HIT")
-	_add_ball(1, "Blue Bomber", "DROP_BOMBS")
-	_add_ball(2, "Purple Splitter", "SPLIT_ON_WALL")
-	_add_ball(3, "Gold Randomizer", "RANDOM_BLAST")
-	_select_ball(1)
+	_seed_demo()
+	_select_ball(balls[0].id)
+	_refresh_roster()
+	_refresh_script_panel()
 	queue_redraw()
 
 func _build_ui() -> void:
-	var layer := CanvasLayer.new()
-	add_child(layer)
 	var root := Control.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	layer.add_child(root)
+	add_child(root)
+
 	var title := Label.new()
 	title.position = Vector2(24, 18)
-	title.text = "BOUNCEFORGE  /  ARENA"
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", Color("#e9f0ff"))
+	title.text = "BounceForge Arena"
+	title.add_theme_font_size_override("font_size", 26)
+	title.add_theme_color_override("font_color", Color("#edf5ff"))
 	root.add_child(title)
-	var sub := Label.new()
-	sub.position = Vector2(315, 25)
-	sub.text = "Physics sandbox  •  programmable objects  •  no pathfinding"
-	sub.add_theme_color_override("font_color", Color("#8998b7"))
-	root.add_child(sub)
+
+	var subtitle := Label.new()
+	subtitle.position = Vector2(240, 28)
+	subtitle.text = "Physics sandbox • programmable characters • weaponized chaos"
+	subtitle.add_theme_color_override("font_color", Color("#8da7d5"))
+	root.add_child(subtitle)
+
 	var panel := Panel.new()
 	panel.position = Vector2(PANEL_X, 14)
-	panel.size = Vector2(280, 722)
-	panel.add_theme_stylebox_override("panel", _box(Color("#171f30"), Color("#2b3954"), 12))
+	panel.size = Vector2(260, 720)
+	panel.add_theme_stylebox_override("panel", _panel_style(Color("#171e2f"), Color("#2a3860"), 12))
 	root.add_child(panel)
-	var v := VBoxContainer.new()
-	v.position = Vector2(18, 16)
-	v.size = Vector2(244, 690)
-	v.add_theme_constant_override("separation", 9)
-	panel.add_child(v)
-	var ptitle := Label.new()
-	ptitle.text = "SIMULATION CONTROL"
-	ptitle.add_theme_font_size_override("font_size", 15)
-	ptitle.add_theme_color_override("font_color", Color("#79d7ff"))
-	v.add_child(ptitle)
-	start_button = _button("START SIMULATION", _start)
-	v.add_child(start_button)
-	pause_button = _button("PAUSE", _pause)
-	v.add_child(pause_button)
-	var restart := _button("RESTART", _restart)
-	v.add_child(restart)
-	status_label = Label.new()
-	status_label.text = "READY • Add contestants and press START"
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status_label.add_theme_color_override("font_color", Color("#a9b7d2"))
-	v.add_child(status_label)
-	var sep := HSeparator.new(); v.add_child(sep)
-	var speed_title := Label.new(); speed_title.text = "SIMULATION SPEED"; v.add_child(speed_title)
-	var speeds := HBoxContainer.new(); v.add_child(speeds)
+
+	var vbox := VBoxContainer.new()
+	vbox.position = Vector2(14, 16)
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 8)
+	panel.add_child(vbox)
+
+	var ui_title := Label.new()
+	ui_title.text = "SIMULATION"
+	ui_title.add_theme_color_override("font_color", Color("#79d6ff"))
+	vbox.add_child(ui_title)
+
+	var start_btn := Button.new(); start_btn.text = "START"; start_btn.pressed.connect(_start_simulation); vbox.add_child(start_btn)
+	var pause_btn := Button.new(); pause_btn.text = "PAUSE"; pause_btn.pressed.connect(_pause_simulation); vbox.add_child(pause_btn)
+	var restart_btn := Button.new(); restart_btn.text = "RESTART"; restart_btn.pressed.connect(_restart_simulation); vbox.add_child(restart_btn)
+	var save_btn := Button.new(); save_btn.text = "SAVE PROJECT"; save_btn.pressed.connect(_save_project); vbox.add_child(save_btn)
+	var load_btn := Button.new(); load_btn.text = "LOAD PROJECT"; load_btn.pressed.connect(_load_project); vbox.add_child(load_btn)
+	ui.status_label = Label.new(); ui.status_label.text = "READY"; ui.status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; ui.status_label.add_theme_color_override("font_color", Color("#d4def8")); vbox.add_child(ui.status_label)
+
+	var sep1 := HSeparator.new(); vbox.add_child(sep1)
+	var speed_title := Label.new(); speed_title.text = "Speed"; vbox.add_child(speed_title)
+	var speed_box := HBoxContainer.new(); speed_box.add_theme_constant_override("separation", 5); vbox.add_child(speed_box)
 	for s in [0.25, 0.5, 1.0, 2.0]:
-		var b := _button(str(s) + "x", func(): _set_speed(s)); b.custom_minimum_size.x = 54; speeds.add_child(b)
-	speed_label = Label.new(); speed_label.text = "Speed: 1.0x"; speed_label.add_theme_color_override("font_color", Color("#79d7ff")); v.add_child(speed_label)
-	sep = HSeparator.new(); v.add_child(sep)
-	var ctitle := Label.new(); ctitle.text = "ADD CONTESTANT"; ctitle.add_theme_font_size_override("font_size", 15); ctitle.add_theme_color_override("font_color", Color("#79d7ff")); v.add_child(ctitle)
-	name_edit = LineEdit.new(); name_edit.placeholder_text = "Name (optional)"; v.add_child(name_edit)
-	team_option = OptionButton.new()
-	for n in TEAM_NAMES: team_option.add_item(n)
-	team_option.selected = 0
-	v.add_child(team_option)
-	behavior_option = OptionButton.new()
-	behavior_option.add_item("Simple Bouncer")
-	behavior_option.add_item("Shoot on Touch")
-	behavior_option.add_item("Drop Bombs")
-	behavior_option.add_item("Split on Wall")
-	behavior_option.add_item("Random Blast")
-	v.add_child(behavior_option)
-	add_button = _button("+ ADD BALL", _add_from_ui); v.add_child(add_button)
-	sep = HSeparator.new(); v.add_child(sep)
-	var stitle := Label.new(); stitle.text = "SELECTED OBJECT"; stitle.add_theme_font_size_override("font_size", 15); stitle.add_theme_color_override("font_color", Color("#79d7ff")); v.add_child(stitle)
-	selected_label = Label.new(); selected_label.text = "None"; selected_label.add_theme_color_override("font_color", Color("#f5d77a")); v.add_child(selected_label)
-	var btitle := Label.new(); btitle.text = "BLOCK STUDIO  •  add behavior blocks"; btitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; v.add_child(btitle)
-	var block_row := GridContainer.new(); block_row.columns = 2; block_row.add_theme_constant_override("h_separation", 5); block_row.add_theme_constant_override("v_separation", 5); v.add_child(block_row)
-	for data in [["WHEN HIT", "ON_HIT"], ["EVERY 3 SEC", "TIMER"], ["ON WALL", "ON_WALL"], ["RANDOM", "RANDOM"]]:
-		var b := _button(data[0], func(): _add_block(data[1])); b.custom_minimum_size = Vector2(116, 30); block_row.add_child(b)
-	behavior_label = Label.new(); behavior_label.text = "Blocks: —"; behavior_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; behavior_label.add_theme_color_override("font_color", Color("#a9b7d2")); v.add_child(behavior_label)
-	sep = HSeparator.new(); v.add_child(sep)
-	var atitle := Label.new(); atitle.text = "ARENA STYLE"; atitle.add_theme_font_size_override("font_size", 15); atitle.add_theme_color_override("font_color", Color("#79d7ff")); v.add_child(atitle)
-	color_bg = ColorPickerButton.new(); color_bg.text = "Background color"; color_bg.color = background; color_bg.color_changed.connect(_bg_changed); v.add_child(color_bg)
-	color_outline = ColorPickerButton.new(); color_outline.text = "Outline color"; color_outline.color = outline; color_outline.color_changed.connect(_outline_changed); v.add_child(color_outline)
-	roster_label = Label.new(); roster_label.position = Vector2(42, 104); roster_label.add_theme_color_override("font_color", Color("#8fa2c4")); root.add_child(roster_label)
+		var b := Button.new(); b.text = str(s) + "x"; b.custom_minimum_size.x = 55; b.pressed.connect(func(): _set_speed(s)); speed_box.add_child(b)
+	ui.speed_label = Label.new(); ui.speed_label.text = "Speed: 1.0x"; ui.speed_label.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(ui.speed_label)
 
-func _box(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
-	var x := StyleBoxFlat.new(); x.bg_color = bg; x.border_color = border
-	x.set_border_width_all(1); x.set_corner_radius_all(radius); return x
+	var sep2 := HSeparator.new(); vbox.add_child(sep2)
+	var creator_title := Label.new(); creator_title.text = "CHARACTER CREATOR"; creator_title.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(creator_title)
+	var name_edit := LineEdit.new(); name_edit.placeholder_text = "Character name"; vbox.add_child(name_edit)
+	var team_box := OptionButton.new(); for n in TEAM_NAMES: team_box.add_item(n); team_box.select(0); vbox.add_child(team_box)
+	var template_box := OptionButton.new(); template_box.add_item("Bouncer"); template_box.add_item("Shooter"); template_box.add_item("Bomber"); template_box.add_item("Splitter"); template_box.add_item("Randomizer"); template_box.add_item("Guardian"); vbox.add_child(template_box)
+	var add_ball_btn := Button.new(); add_ball_btn.text = "+ ADD BALL"; add_ball_btn.pressed.connect(func(): _add_character_from_ui(name_edit.text, team_box.selected, template_box.get_item_text(template_box.selected))); vbox.add_child(add_ball_btn)
+	var bg_picker := ColorPickerButton.new(); bg_picker.text = "Background"; bg_picker.color = background; bg_picker.color_changed.connect(func(c): background = c; queue_redraw()); vbox.add_child(bg_picker)
+	var outline_picker := ColorPickerButton.new(); outline_picker.text = "Arena outline"; outline_picker.color = outline; outline_picker.color_changed.connect(func(c): outline = c; queue_redraw()); vbox.add_child(outline_picker)
 
-func _button(text: String, action: Callable) -> Button:
-	var b := Button.new(); b.text = text; b.custom_minimum_size.y = 34; b.pressed.connect(action); return b
+	var sep3 := HSeparator.new(); vbox.add_child(sep3)
+	var block_title := Label.new(); block_title.text = "BLOCK EDITOR"; block_title.add_theme_color_override("font_color", Color("#79d6ff")); vbox.add_child(block_title)
+	var event_menu := OptionButton.new(); for label in EVENT_LABELS: event_menu.add_item(label); event_menu.select(0); vbox.add_child(event_menu)
+	var action_menu := OptionButton.new(); for label in ACTION_LABELS: action_menu.add_item(label); action_menu.select(0); vbox.add_child(action_menu)
+	var add_block_btn := Button.new(); add_block_btn.text = "ADD BEHAVIOR BLOCK"; add_block_btn.pressed.connect(func(): _attach_behavior(event_menu.get_item_text(event_menu.selected), action_menu.get_item_text(action_menu.selected))); vbox.add_child(add_block_btn)
+	ui.script_label = Label.new(); ui.script_label.text = "Selected script: none"; ui.script_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; ui.script_label.add_theme_color_override("font_color", Color("#ccd8f1")); vbox.add_child(ui.script_label)
 
-func _add_from_ui() -> void:
-	var n := name_edit.text.strip_edges()
-	if n.is_empty(): n = "Contestant " + str(next_id)
-	var key := ["BOUNCE", "SHOOT_ON_HIT", "DROP_BOMBS", "SPLIT_ON_WALL", "RANDOM_BLAST"][behavior_option.selected]
-	_add_ball(team_option.selected, n, key)
-	name_edit.clear()
+	ui.roster_label = Label.new(); ui.roster_label.position = Vector2(30, 110); ui.roster_label.add_theme_color_override("font_color", Color("#b9c9eb")); root.add_child(ui.roster_label)
+	ui.selected_label = Label.new(); ui.selected_label.position = Vector2(30, 72); ui.selected_label.add_theme_color_override("font_color", Color("#ffe39b")); root.add_child(ui.selected_label)
 
-func _add_ball(team: int, display_name: String, behavior: String, pos := Vector2(-1, -1), vel := Vector2(-1, -1)) -> void:
-	var p := pos if pos.x >= 0 else Vector2(100 + fmod(float(next_id * 113), 670.0), 140 + fmod(float(next_id * 71), 500.0))
-	var v := vel if vel.x >= 0 else Vector2(110 + fmod(float(next_id * 37), 100.0), -90 - fmod(float(next_id * 23), 100.0))
-	balls.append({"id": next_id, "name": display_name, "team": team, "pos": p, "vel": v, "radius": 18.0, "health": 100.0, "max_health": 100.0, "behavior": behavior, "blocks": [behavior], "cooldown": 0.0, "age": 0.0, "hits": 0, "shield": 0.0})
-	selected_id = next_id; next_id += 1; _refresh_ui(); queue_redraw()
+func _panel_style(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
+	var box := StyleBoxFlat.new();
+	box.bg_color = bg
+	box.border_color = border
+	box.border_width_left = 1
+	box.border_width_top = 1
+	box.border_width_right = 1
+	box.border_width_bottom = 1
+	box.corner_radius_top_left = radius
+	box.corner_radius_top_right = radius
+	box.corner_radius_bottom_left = radius
+	box.corner_radius_bottom_right = radius
+	return box
+
+func _seed_demo() -> void:
+	_add_character("Red Rocket", 0, "Shooter")
+	_add_character("Blue Bomber", 1, "Bomber")
+	_add_character("Purple Splitter", 2, "Splitter")
+	_add_character("Gold Randomizer", 3, "Randomizer")
+	_add_character("Green Guardian", 4, "Guardian")
+
+func _add_character_from_ui(name_text: String, team_index: int, template_text: String) -> void:
+	var name_value := name_text.strip_edges()
+	if name_value.is_empty():
+		name_value = "Contestant " + str(next_id)
+	_add_character(name_value, team_index, template_text)
+	_select_ball(balls[-1].id)
+	_refresh_roster()
+	_refresh_script_panel()
+	queue_redraw()
+
+func _add_character(name_value: String, team_index: int, template_text: String) -> void:
+	var pos := Vector2(
+		randf_range(ARENA.position.x + 70, ARENA.end.x - 70),
+		randf_range(ARENA.position.y + 70, ARENA.end.y - 70)
+	)
+	var vel := Vector2(randf_range(90.0, 180.0), randf_range(-120.0, 120.0))
+	if randf() < 0.5:
+		vel.x *= -1.0
+	var ball := {
+		"id": next_id,
+		"name": name_value,
+		"team": clampi(team_index, 0, TEAM_NAMES.size() - 1),
+		"pos": pos,
+		"vel": vel,
+		"radius": 18.0,
+		"mass": 1.0,
+		"health": 100.0,
+		"max_health": 100.0,
+		"shield": 0.0,
+		"cooldown": 0.0,
+		"age": 0.0,
+		"script": {"ON_HIT": [], "ON_WALL": [], "EVERY_3S": [], "ON_DAMAGE": [], "ON_DESTROY": []}
+	}
+	_apply_preset(ball, template_text)
+	balls.append(ball)
+	next_id += 1
+	if selected_id == -1:
+		selected_id = ball.id
+
+func _apply_preset(ball: Dictionary, template_text: String) -> void:
+	match template_text:
+		"Shooter":
+			ball.script["ON_HIT"] = ["SHOOT"]
+			ball.script["EVERY_3S"] = ["SHOOT"]
+		"Bomber":
+			ball.script["EVERY_3S"] = ["DROP_BOMB"]
+			ball.script["ON_WALL"] = ["SPEED_UP"]
+		"Splitter":
+			ball.script["ON_WALL"] = ["SPLIT"]
+			ball.script["ON_HIT"] = ["SPEED_UP"]
+		"Randomizer":
+			ball.script["EVERY_3S"] = ["RANDOM_BLAST"]
+			ball.script["ON_HIT"] = ["RANDOM_BLAST"]
+		"Guardian":
+			ball.script["EVERY_3S"] = ["CREATE_SHIELD"]
+			ball.script["ON_DAMAGE"] = ["CREATE_SHIELD"]
+		_: 
+			ball.script["ON_HIT"] = ["SPEED_UP"]
+			ball.script["ON_WALL"] = ["SPEED_UP"]
 
 func _select_ball(id: int) -> void:
-	selected_id = id; _refresh_ui()
+	selected_id = id
+	_refresh_script_panel()
+	_refresh_roster()
 
-func _refresh_ui() -> void:
-	var lines := ["ROSTER"]
-	for b in balls:
-		lines.append(("> " if b.id == selected_id else "  ") + str(b.id) + "  " + b.name + "  [" + TEAM_NAMES[b.team] + "]")
-	roster_label.text = "\n".join(lines)
-	var found := _find_ball(selected_id)
-	if found.is_empty(): selected_label.text = "None"; behavior_label.text = "Blocks: —"
-	else:
-		selected_label.text = found.name + "  •  HP " + str(round(found.health)) + "  •  " + TEAM_NAMES[found.team]
-		behavior_label.text = "Blocks: " + ", ".join(found.blocks)
+func _attach_behavior(event_name: String, action_name: String) -> void:
+	var ball := _get_selected_ball()
+	if ball.is_empty():
+		ui.status_label.text = "Select a ball first"; return
+	if not ball.script.has(event_name):
+		ball.script[event_name] = []
+	ball.script[event_name].append(action_name)
+	ui.status_label.text = "Added %s -> %s" % [event_name, action_name]
+	_refresh_script_panel()
+	_refresh_roster()
 
-func _find_ball(id: int) -> Dictionary:
-	for b in balls:
-		if b.id == id: return b
+func _get_selected_ball() -> Dictionary:
+	for ball in balls:
+		if ball.id == selected_id:
+			return ball
 	return {}
 
-func _start() -> void:
-	running = true; status_label.text = "RUNNING • Watch the systems collide"; start_button.disabled = true
-func _pause() -> void:
-	running = not running; status_label.text = "RUNNING • Physics live" if running else "PAUSED • Press PAUSE to resume"; start_button.disabled = running
-func _restart() -> void:
-	for b in balls:
-		b.pos = Vector2(100 + fmod(float(b.id * 113), 670.0), 140 + fmod(float(b.id * 71), 500.0)); b.health = b.max_health; b.age = 0; b.cooldown = 0; b.shield = 0
-	projectiles.clear(); effects.clear(); elapsed = 0; running = false; start_button.disabled = false; status_label.text = "READY • Simulation restarted"; queue_redraw()
-func _set_speed(s: float) -> void:
-	time_scale = s; speed_label.text = "Speed: " + str(s) + "x"
-func _bg_changed(c: Color) -> void: background = c; queue_redraw()
-func _outline_changed(c: Color) -> void: outline = c; queue_redraw()
+func _refresh_roster() -> void:
+	var roster_lines := ["ROSTER"]
+	for ball in balls:
+		var marker := "  "
+		if ball.id == selected_id:
+			marker = "> "
+		roster_lines.append(marker + str(ball.id) + "  " + ball.name + "  [" + TEAM_NAMES[ball.team] + "]  HP " + str(int(ball.health)))
+	ui.roster_label.text = "\n".join(roster_lines)
+	var selected := _get_selected_ball()
+	if selected.is_empty():
+		ui.selected_label.text = "No selection"
+		ui.script_label.text = "Selected script: none"
+	else:
+		ui.selected_label.text = selected.name + " • " + TEAM_NAMES[selected.team] + " • HP " + str(int(selected.health))
+		_refresh_script_panel()
 
-func _add_block(block: String) -> void:
-	var b := _find_ball(selected_id)
-	if b.is_empty(): return
-	b.blocks.append(block); behavior_label.text = "Blocks: " + ", ".join(b.blocks)
+func _refresh_script_panel() -> void:
+	var ball := _get_selected_ball()
+	if ball.is_empty():
+		ui.script_label.text = "Selected script: none"
+		return
+	var parts: Array[String] = []
+	for event_name in EVENT_LABELS:
+		if ball.script.has(event_name) and ball.script[event_name].size() > 0:
+			parts.append(event_name + ": " + ", ".join(ball.script[event_name]))
+	ui.script_label.text = "Selected script: " + (" | ".join(parts) if parts.size() > 0 else "empty")
+
+func _start_simulation() -> void:
+	running = true
+	ui.status_label.text = "Simulation running"
+
+func _pause_simulation() -> void:
+	running = !running
+	ui.status_label.text = "Simulation paused" if !running else "Simulation running"
+
+func _restart_simulation() -> void:
+	for ball in balls:
+		ball.pos = Vector2(
+			randf_range(ARENA.position.x + 60, ARENA.end.x - 60),
+			randf_range(ARENA.position.y + 60, ARENA.end.y - 60)
+		)
+		ball.vel = Vector2(randf_range(90.0, 180.0), randf_range(-120.0, 120.0));
+		if randf() < 0.5:
+			ball.vel.x *= -1.0
+		ball.health = ball.max_health
+		ball.shield = 0.0
+		ball.cooldown = 0.0
+		ball.age = 0.0
+	projectiles.clear()
+	effects.clear()
+	running = false
+	ui.status_label.text = "Simulation reset"
+	_refresh_roster()
+	queue_redraw()
+
+func _set_speed(s: float) -> void:
+	time_scale = s
+	ui.speed_label.text = "Speed: " + str(s) + "x"
+
+func _save_project() -> void:
+	var payload := {"background": background.to_html(), "outline": outline.to_html(), "balls": []}
+	for ball in balls:
+		payload["balls"].append({
+			"name": ball.name,
+			"team": ball.team,
+			"pos": [ball.pos.x, ball.pos.y],
+			"vel": [ball.vel.x, ball.vel.y],
+			"radius": ball.radius,
+			"health": ball.health,
+			"max_health": ball.max_health,
+			"script": ball.script
+		})
+	var file := FileAccess.open(project_file, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(payload, " "))
+		ui.status_label.text = "Project saved to user://bounceforge_project.json"
+	else:
+		ui.status_label.text = "Could not save project"
+
+func _load_project() -> void:
+	if not FileAccess.file_exists(project_file):
+		ui.status_label.text = "No saved project found"; return
+	var file := FileAccess.open(project_file, FileAccess.READ)
+	if not file:
+		ui.status_label.text = "Could not open saved project"; return
+	var payload = JSON.parse_string(file.get_as_text())
+	if typeof(payload) != TYPE_DICTIONARY:
+		ui.status_label.text = "Saved project was invalid"; return
+	if payload.has("background"):
+		background = Color(payload["background"])
+	if payload.has("outline"):
+		outline = Color(payload["outline"])
+	balls.clear(); projectiles.clear(); effects.clear();
+	for entry in payload.get("balls", []):
+		var ball := {
+			"id": next_id,
+			"name": str(entry.get("name", "Contestant " + str(next_id))),
+			"team": int(entry.get("team", 0)),
+			"pos": Vector2(float(entry.get("pos", [0.0, 0.0])[0]), float(entry.get("pos", [0.0, 0.0])[1])),
+			"vel": Vector2(float(entry.get("vel", [0.0, 0.0])[0]), float(entry.get("vel", [0.0, 0.0])[1])),
+			"radius": float(entry.get("radius", 18.0)),
+			"mass": 1.0,
+			"health": float(entry.get("health", 100.0)),
+			"max_health": float(entry.get("max_health", 100.0)),
+			"shield": 0.0,
+			"cooldown": 0.0,
+			"age": 0.0,
+			"script": entry.get("script", {"ON_HIT": [], "ON_WALL": [], "EVERY_3S": [], "ON_DAMAGE": [], "ON_DESTROY": []})
+		}
+		balls.append(ball)
+		next_id += 1
+	selected_id = balls[0].id if not balls.is_empty() else -1
+	ui.status_label.text = "Project loaded"
+	_refresh_roster()
+	_refresh_script_panel()
+	queue_redraw()
 
 func _process(delta: float) -> void:
-	if running: _simulate(delta * time_scale)
+	if running:
+		_simulate(delta * time_scale)
 	queue_redraw()
 
 func _simulate(dt: float) -> void:
-	elapsed += dt
-	for b in balls:
-		b.age += dt; b.cooldown = max(0.0, b.cooldown - dt); b.shield = max(0.0, b.shield - dt)
-		b.pos += b.vel * dt
-		var bounced := false
-		if b.pos.x - b.radius < ARENA.position.x: b.pos.x = ARENA.position.x + b.radius; b.vel.x = abs(b.vel.x); bounced = true
-		if b.pos.x + b.radius > ARENA.end.x: b.pos.x = ARENA.end.x - b.radius; b.vel.x = -abs(b.vel.x); bounced = true
-		if b.pos.y - b.radius < ARENA.position.y: b.pos.y = ARENA.position.y + b.radius; b.vel.y = abs(b.vel.y); bounced = true
-		if b.pos.y + b.radius > ARENA.end.y: b.pos.y = ARENA.end.y - b.radius; b.vel.y = -abs(b.vel.y); bounced = true
-		if bounced: _event(b, "ON_WALL")
-		if "TIMER" in b.blocks and fmod(b.age, 3.0) < dt: _shoot(b)
-		if b.behavior == "DROP_BOMBS" and fmod(b.age, 3.2) < dt: _bomb(b)
-		if b.behavior == "RANDOM_BLAST" and fmod(b.age, 4.5) < dt: _random_blast(b)
+	for ball in balls:
+		ball.age += dt
+		ball.cooldown = max(0.0, ball.cooldown - dt)
+		ball.shield = max(0.0, ball.shield - dt)
+		ball.pos += ball.vel * dt
+
+		if ball.pos.x - ball.radius < ARENA.position.x:
+			ball.pos.x = ARENA.position.x + ball.radius
+			ball.vel.x = abs(ball.vel.x)
+			_trigger_behavior(ball, "ON_WALL")
+		if ball.pos.x + ball.radius > ARENA.end.x:
+			ball.pos.x = ARENA.end.x - ball.radius
+			ball.vel.x = -abs(ball.vel.x)
+			_trigger_behavior(ball, "ON_WALL")
+		if ball.pos.y - ball.radius < ARENA.position.y:
+			ball.pos.y = ARENA.position.y + ball.radius
+			ball.vel.y = abs(ball.vel.y)
+			_trigger_behavior(ball, "ON_WALL")
+		if ball.pos.y + ball.radius > ARENA.end.y:
+			ball.pos.y = ARENA.end.y - ball.radius
+			ball.vel.y = -abs(ball.vel.y)
+			_trigger_behavior(ball, "ON_WALL")
+		if fmod(ball.age, 3.0) < dt:
+			_trigger_behavior(ball, "EVERY_3S")
+
 	for i in range(balls.size()):
-		for j in range(i + 1, balls.size()): _ball_collision(balls[i], balls[j])
-	for p in projectiles.duplicate():
-		p.pos += p.vel * dt; p.life -= dt
-		if p.pos.x < ARENA.position.x or p.pos.x > ARENA.end.x: p.vel.x *= -1
-		if p.pos.y < ARENA.position.y or p.pos.y > ARENA.end.y: p.vel.y *= -1
-		for b in balls:
-			if b.id != p.owner and b.team != p.team and b.pos.distance_to(p.pos) < b.radius + 6:
-				_damage(b, p.damage); p.life = 0; break
-		if p.life <= 0: projectiles.erase(p)
-	for e in effects.duplicate():
-		e.life -= dt
-		if e.life <= 0: effects.erase(e)
-	balls = balls.filter(func(x): return x.health > 0)
-	if selected_id != -1 and _find_ball(selected_id).is_empty(): selected_id = balls[0].id if not balls.is_empty() else -1
-	_refresh_ui()
+		for j in range(i + 1, balls.size()):
+			_resolve_ball_collision(balls[i], balls[j])
 
-func _ball_collision(a: Dictionary, b: Dictionary) -> void:
-	var d := a.pos.distance_to(b.pos); var min_d := a.radius + b.radius
-	if d > 0 and d < min_d:
-		var n := (a.pos - b.pos).normalized(); var overlap := min_d - d
-		a.pos += n * overlap * 0.5; b.pos -= n * overlap * 0.5
-		var av := a.vel; a.vel = av - n * (2.0 * (av - b.vel).dot(n) * b.get("mass", 1.0) / 2.0); b.vel = b.vel + n * (2.0 * (av - b.vel).dot(n) * a.get("mass", 1.0) / 2.0)
-		_event(a, "ON_HIT"); _event(b, "ON_HIT")
+	for projectile in projectiles:
+		projectile.pos += projectile.vel * dt
+		projectile.life -= dt
+		if projectile.pos.x < ARENA.position.x or projectile.pos.x > ARENA.end.x:
+			projectile.vel.x *= -1.0
+		if projectile.pos.y < ARENA.position.y or projectile.pos.y > ARENA.end.y:
+			projectile.vel.y *= -1.0
+		for ball in balls:
+			if ball.id == projectile.owner_id:
+				continue
+			if ball.team == projectile.team:
+				continue
+			if projectile.pos.distance_to(ball.pos) <= projectile.radius + ball.radius:
+				_apply_damage(ball, projectile.damage, projectile.owner_id)
+				projectile.life = 0.0
+				break
+		if projectile.life <= 0.0:
+			_effect(projectile.pos, "blast", Color("#ffd06e"), 0.25)
+		projectiles = projectiles.filter(func(item): return item.life > 0.0)
 
-func _event(b: Dictionary, event: String) -> void:
-	if event == "ON_HIT" and b.behavior == "SHOOT_ON_HIT": _shoot(b)
-	if event == "ON_WALL" and b.behavior == "SPLIT_ON_WALL" and b.cooldown <= 0 and balls.size() < 28:
-		b.cooldown = 2.0; _add_ball(b.team, b.name + " mini", "BOUNCE", b.pos, Vector2(-b.vel.y, b.vel.x)); balls[-1].radius = 10; balls[-1].health = 35; balls[-1].max_health = 35
-	if event == "ON_HIT" and "RANDOM" in b.blocks and b.cooldown <= 0: _random_blast(b)
+	for effect in effects:
+		effect.life -= dt
+	if not effects.is_empty():
+		effects = effects.filter(func(item): return item.life > 0.0)
+	for ball in balls:
+		if ball.health <= 0.0:
+			_trigger_behavior(ball, "ON_DESTROY")
+	balls = balls.filter(func(item): return item.health > 0.0)
+	if selected_id != -1 and _get_selected_ball().is_empty():
+		selected_id = balls[0].id if not balls.is_empty() else -1
+	_refresh_roster()
+	_refresh_script_panel()
 
-func _shoot(b: Dictionary) -> void:
-	if b.cooldown > 0: return
-	b.cooldown = 0.55; var dir := b.vel.normalized(); projectiles.append({"pos": b.pos + dir * 20, "vel": dir * 360, "owner": b.id, "team": b.team, "damage": 14.0, "life": 3.0}); effects.append({"pos": b.pos, "life": 0.12, "kind": "muzzle"})
-func _bomb(b: Dictionary) -> void:
-	if b.cooldown > 0: return
-	b.cooldown = 3.0; effects.append({"pos": b.pos + Vector2(randf_range(-80,80), randf_range(-80,80)), "life": 0.8, "kind": "bomb"})
-func _random_blast(b: Dictionary) -> void:
-	if b.cooldown > 0: return
-	b.cooldown = 1.0; var at := Vector2(randf_range(ARENA.position.x + 20, ARENA.end.x - 20), randf_range(ARENA.position.y + 20, ARENA.end.y - 20)); effects.append({"pos": at, "life": 0.35, "kind": "blast"})
+func _resolve_ball_collision(a: Dictionary, b: Dictionary) -> void:
+	var diff := a.pos - b.pos
+	var dist_sq := diff.length_squared()
+	var min_dist := a.radius + b.radius
+	if dist_sq <= 0.0 or dist_sq >= min_dist * min_dist:
+		return
+	var dist := sqrt(dist_sq)
+	var normal := diff.normalized() if dist > 0.0 else Vector2.RIGHT
+	var overlap := min_dist - dist
+	a.pos += normal * overlap * 0.5
+	b.pos -= normal * overlap * 0.5
+	var relative_velocity := b.vel - a.vel
+	var impulse := relative_velocity.dot(normal)
+	if impulse > 0.0:
+		return
+	var restitution := 0.9
+	var correction := -(1.0 + restitution) * impulse / (1.0 / a.mass + 1.0 / b.mass)
+	var impulse_vector := correction * normal
+	a.vel -= impulse_vector / a.mass
+	b.vel += impulse_vector / b.mass
+	_trigger_behavior(a, "ON_HIT")
+	_trigger_behavior(b, "ON_HIT")
+
+func _trigger_behavior(ball: Dictionary, event_name: String) -> void:
+	if ball.is_empty():
+		return
+	for action in ball.script.get(event_name, []):
+		_execute_action(ball, action)
+
+func _execute_action(ball: Dictionary, action_name: String) -> void:
+	match action_name:
+		"SHOOT":
+			_spawn_projectile(ball, 340.0, 18.0)
+		"DROP_BOMB":
+			_effect(ball.pos + Vector2(randf_range(-30.0, 30.0), randf_range(-30.0, 30.0)), "bomb", Color("#ffb14c"), 0.45)
+			for other in balls:
+				if other.id == ball.id:
+					continue
+				if other.team == ball.team:
+					continue
+				if ball.pos.distance_to(other.pos) <= 75.0:
+					_apply_damage(other, 16.0, ball.id)
+		"RANDOM_BLAST":
+			_random_blast(ball)
+		"SPLIT":
+			_split_ball(ball)
+		"CREATE_SHIELD":
+			ball.shield = 2.0
+		"SPEED_UP":
+			ball.vel *= 1.12
+		"SUMMON_MINION":
+			_add_character(ball.name + " Minion", ball.team, "Shooter")
+			balls[-1].pos = ball.pos + Vector2(randf_range(-25.0, 25.0), randf_range(-25.0, 25.0))
+			balls[-1].vel = ball.vel * 1.15
+		"TELEPORT":
+			ball.pos = Vector2(randf_range(ARENA.position.x + 40, ARENA.end.x - 40), randf_range(ARENA.position.y + 40, ARENA.end.y - 40))
+		"HEAL":
+			ball.health = min(ball.max_health, ball.health + 20.0)
+		_:
+			pass
+
+func _spawn_projectile(ball: Dictionary, speed: float, radius: float) -> void:
+	var direction := ball.vel.normalized();
+	if direction.length() < 0.1:
+		direction = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)).normalized()
+	projectiles.append({
+		"pos": ball.pos + direction * (ball.radius + radius + 6.0),
+		"vel": direction * speed,
+		"radius": radius,
+		"damage": 12.0,
+		"owner_id": ball.id,
+		"team": ball.team,
+		"life": 3.5
+	})
+	_effect(ball.pos, "muzzle", Color("#dfeaff"), 0.12)
+
+func _random_blast(ball: Dictionary) -> void:
+	var target := Vector2(randf_range(ARENA.position.x + 20.0, ARENA.end.x - 20.0), randf_range(ARENA.position.y + 20.0, ARENA.end.y - 20.0))
+	_effect(target, "blast", Color("#ff8a5c"), 0.5)
 	for other in balls:
-		if other.team != b.team and other.pos.distance_to(at) < 95: _damage(other, 10)
-func _damage(b: Dictionary, amount: float) -> void:
-	if b.shield > 0: b.shield = 0; return
-	b.health -= amount; b.hits += 1; b.vel *= 1.04
+		if other.team == ball.team:
+			continue
+		if other.pos.distance_to(target) <= 90.0:
+			_apply_damage(other, 18.0, ball.id)
+
+func _split_ball(ball: Dictionary) -> void:
+	if balls.size() >= 40:
+		return
+	var clone := {
+		"id": next_id,
+		"name": ball.name + " mini",
+		"team": ball.team,
+		"pos": ball.pos + Vector2(randf_range(-15.0, 15.0), randf_range(-15.0, 15.0)),
+		"vel": ball.vel * 1.25 + Vector2(randf_range(-20.0, 20.0), randf_range(-20.0, 20.0)),
+		"radius": max(8.0, ball.radius * 0.68),
+		"mass": 0.7,
+		"health": 40.0,
+		"max_health": 40.0,
+		"shield": 0.0,
+		"cooldown": 0.0,
+		"age": 0.0,
+		"script": {
+			"ON_HIT": ["SPEED_UP"],
+			"ON_WALL": ["SPEED_UP"],
+			"EVERY_3S": ["SHOOT"],
+			"ON_DAMAGE": [],
+			"ON_DESTROY": []
+		}
+	}
+	balls.append(clone)
+	next_id += 1
+	ball.health = max(0.0, ball.health - 15.0)
+
+func _effect(pos: Vector2, kind: String, color: Color, duration: float) -> void:
+	effects.append({"pos": pos, "kind": kind, "color": color, "life": duration})
+
+func _apply_damage(ball: Dictionary, amount: float, attacker_id: int = -1) -> void:
+	if ball.is_empty():
+		return
+	if ball.shield > 0.0:
+		ball.shield = 0.0
+		_trigger_behavior(ball, "ON_DAMAGE")
+		return
+	ball.health -= amount
+	ball.vel *= 1.07
+	if attacker_id != -1:
+		_trigger_behavior(ball, "ON_DAMAGE")
+	if ball.health <= 0.0:
+		_trigger_behavior(ball, "ON_DESTROY")
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, Vector2(1180, 760)), Color("#0b0f18"))
-	draw_style_box(_box(background, outline, 10), ARENA)
-	draw_line(ARENA.position, Vector2(ARENA.end.x, ARENA.position.y), outline, 3)
-	draw_line(Vector2(ARENA.position.x, ARENA.end.y), ARENA.end, outline, 3)
-	for b in balls:
-		var c: Color = COLORS[b.team]; draw_circle(b.pos, b.radius + 3, Color(c, 0.13)); draw_circle(b.pos, b.radius, c); draw_arc(b.pos, b.radius, 0, TAU, 24, Color("#ffffff"), 1.5)
-		if b.shield > 0: draw_arc(b.pos, b.radius + 6, 0, TAU, 24, Color("#75e6ff"), 3)
-		var hp := max(0.0, b.health / b.max_health); draw_rect(Rect2(b.pos + Vector2(-20, -b.radius - 12), Vector2(40 * hp, 3)), Color("#7df0a6")); draw_string(ThemeDB.fallback_font, b.pos + Vector2(-b.radius, b.radius + 15), b.name, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color("#dce6ff"))
-	for p in projectiles: draw_circle(p.pos, 5, COLORS[p.team]); draw_line(p.pos, p.pos - p.vel.normalized() * 10, Color("#fff1a8"), 2)
-	for e in effects:
-		var r := 25.0 * (1.0 - e.life / 0.8) if e.kind == "bomb" else 70.0 * (1.0 - e.life / 0.35)
-		draw_arc(e.pos, r, 0, TAU, 24, Color("#ffb84d", e.life / 0.8), 3)
+	draw_rect(Rect2(Vector2.ZERO, Vector2(1180, 760)), Color("#0a101c"))
+	draw_rect(ARENA, background, true)
+	draw_rect(ARENA, Color(0,0,0,0), false)
+	draw_rect(ARENA.grow_indented(-2), color_with_alpha(outline, 0.25), false)
+	draw_rect(ARENA, Color(0,0,0,0), false)
+
+	for ball in balls:
+		var base_color := TEAM_COLORS[ball.team % TEAM_COLORS.size()]
+		draw_circle(ball.pos, ball.radius + 3.0, color_with_alpha(base_color, 0.18))
+		draw_circle(ball.pos, ball.radius, base_color)
+		draw_arc(ball.pos, ball.radius + 2.0, 0.0, TAU, 18, Color("#f6fbff"), 1.2)
+		if ball.shield > 0.0:
+			draw_arc(ball.pos, ball.radius + 8.0, 0.0, TAU, 24, Color("#7fe7ff"), 2.0)
+		var hp_ratio := clamp(ball.health / max(ball.max_health, 1.0), 0.0, 1.0)
+		draw_rect(Rect2(ball.pos.x - 18.0, ball.pos.y - ball.radius - 14.0, 36.0, 4.0), Color("#2d3a59"))
+		draw_rect(Rect2(ball.pos.x - 18.0, ball.pos.y - ball.radius - 14.0, 36.0 * hp_ratio, 4.0), Color("#7ee5a7"))
+		draw_string(ThemeDB.fallback_font, ball.pos + Vector2(-ball.radius, ball.radius + 16.0), ball.name, HORIZONTAL_ALIGNMENT_CENTER, 80, 10, Color("#edf2ff"))
+
+	for projectile in projectiles:
+		draw_circle(projectile.pos, projectile.radius, TEAM_COLORS[projectile.team % TEAM_COLORS.size()])
+		draw_line(projectile.pos, projectile.pos - projectile.vel.normalized() * 10.0, Color("#f6ffb3"), 1.5)
+
+	for effect in effects:
+		var scale := 1.0 - (effect.life / max(0.01, effect.life + 0.1))
+		var radius = 10.0 + scale * 32.0
+		draw_arc(effect.pos, radius, 0.0, TAU, 24, color_with_alpha(effect.color, 0.8), 2.5)
+
+func color_with_alpha(color: Color, alpha: float) -> Color:
+	return Color(color.r, color.g, color.b, alpha)
