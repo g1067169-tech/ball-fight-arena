@@ -23,7 +23,8 @@ const ACTION_LABELS := [
 	"TELEPORT",
 	"HEAL",
 	"PUSH_AWAY",
-	"SET_RANDOM_VELOCITY"
+	"SET_RANDOM_VELOCITY",
+	"RAIN_EFFECT"
 ]
 
 var balls: Array = []
@@ -60,7 +61,7 @@ func _build_ui() -> void:
 	root.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.position = Vector2(265, 29)
+	subtitle.position = Vector2(260, 29)
 	subtitle.text = "DVD physics + programmable weapons + chaotic battles"
 	subtitle.add_theme_color_override("font_color", Color("#8da7d5"))
 	root.add_child(subtitle)
@@ -164,6 +165,9 @@ func _add_character(name_value: String, team_index: int, template_text: String) 
 		"shield": 0.0,
 		"cooldown": 0.0,
 		"age": 0.0,
+		"weapon_damage": 12.0,
+		"weapon_speed": 340.0,
+		"variables": {"rage": 0.0, "ammo": 8.0},
 		"script": {"ON_HIT": [], "ON_WALL": [], "EVERY_3S": [], "ON_DAMAGE": [], "ON_DESTROY": []}
 	}
 	_apply_preset(ball, template_text)
@@ -228,7 +232,7 @@ func _refresh_roster() -> void:
 		ui.selected_label.text = "No selection"
 		ui.script_label.text = "Selected script: none"
 	else:
-		ui.selected_label.text = selected.name + " • " + TEAM_NAMES[selected.team] + " • HP " + str(int(selected.health))
+		ui.selected_label.text = selected.name + " • " + TEAM_NAMES[selected.team] + " • HP " + str(int(selected.health)) + " • Dmg " + str(int(selected.weapon_damage))
 		_refresh_script_panel()
 
 func _refresh_script_panel() -> void:
@@ -285,7 +289,10 @@ func _save_project() -> void:
 			"radius": ball.radius,
 			"health": ball.health,
 			"max_health": ball.max_health,
-			"script": ball.script
+			"weapon_damage": ball.weapon_damage,
+			"weapon_speed": ball.weapon_speed,
+			"script": ball.script,
+			"variables": ball.variables
 		})
 	var file := FileAccess.open(project_file, FileAccess.WRITE)
 	if file:
@@ -322,6 +329,9 @@ func _load_project() -> void:
 			"shield": 0.0,
 			"cooldown": 0.0,
 			"age": 0.0,
+			"weapon_damage": float(entry.get("weapon_damage", 12.0)),
+			"weapon_speed": float(entry.get("weapon_speed", 340.0)),
+			"variables": entry.get("variables", {"rage": 0.0, "ammo": 8.0}),
 			"script": entry.get("script", {"ON_HIT": [], "ON_WALL": [], "EVERY_3S": [], "ON_DAMAGE": [], "ON_DESTROY": []})
 		}
 		balls.append(ball)
@@ -331,6 +341,14 @@ func _load_project() -> void:
 	_refresh_roster()
 	_refresh_script_panel()
 	queue_redraw()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var click_pos := event.position
+		for ball in balls:
+			if ball.pos.distance_to(click_pos) <= ball.radius + 2.0:
+				_select_ball(ball.id)
+				return
 
 func _process(delta: float) -> void:
 	if running:
@@ -431,7 +449,7 @@ func _trigger_behavior(ball: Dictionary, event_name: String) -> void:
 func _execute_action(ball: Dictionary, action_name: String) -> void:
 	match action_name:
 		"SHOOT":
-			_spawn_projectile(ball, 340.0, 18.0)
+			_spawn_projectile(ball, ball.weapon_speed, 18.0)
 		"DROP_BOMB":
 			_effect(ball.pos + Vector2(randf_range(-30.0, 30.0), randf_range(-30.0, 30.0)), "bomb", Color("#ffb14c"), 0.45)
 			for other in balls:
@@ -463,6 +481,10 @@ func _execute_action(ball: Dictionary, action_name: String) -> void:
 				other.vel += dir * 90.0
 		"SET_RANDOM_VELOCITY":
 			ball.vel = Vector2(randf_range(-220.0, 220.0), randf_range(-220.0, 220.0))
+		"RAIN_EFFECT":
+			for i in range(5):
+				var p := Vector2(randf_range(ARENA.position.x, ARENA.end.x), randf_range(ARENA.position.y, ARENA.end.y))
+				_effect(p, "rain", Color("#82d8ff"), 0.3)
 		_:
 			pass
 
@@ -474,7 +496,7 @@ func _spawn_projectile(ball: Dictionary, speed: float, radius: float) -> void:
 		"pos": ball.pos + direction * (ball.radius + radius + 6.0),
 		"vel": direction * speed,
 		"radius": radius,
-		"damage": 12.0,
+		"damage": ball.weapon_damage,
 		"owner_id": ball.id,
 		"team": ball.team,
 		"life": 3.5
@@ -506,6 +528,9 @@ func _split_ball(ball: Dictionary) -> void:
 		"shield": 0.0,
 		"cooldown": 0.0,
 		"age": 0.0,
+		"weapon_damage": 8.0,
+		"weapon_speed": 280.0,
+		"variables": {"rage": 0.0, "ammo": 2.0},
 		"script": {
 			"ON_HIT": ["SPEED_UP"],
 			"ON_WALL": ["SPEED_UP"],
@@ -531,6 +556,7 @@ func _apply_damage(ball: Dictionary, amount: float, attacker_id: int = -1) -> vo
 	ball.health -= amount
 	ball.vel *= 1.07
 	if attacker_id != -1:
+		ball.variables["rage"] = float(ball.variables.get("rage", 0.0)) + 1.0
 		_trigger_behavior(ball, "ON_DAMAGE")
 	if ball.health <= 0.0:
 		_trigger_behavior(ball, "ON_DESTROY")
@@ -538,7 +564,6 @@ func _apply_damage(ball: Dictionary, amount: float, attacker_id: int = -1) -> vo
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, Vector2(1180, 760)), Color("#0a101c"))
 	draw_rect(ARENA, background, true)
-	draw_rect(ARENA, Color(0, 0, 0, 0), false)
 	draw_rect(Rect2(ARENA.position + Vector2(2, 2), Vector2(ARENA.size.x - 4, ARENA.size.y - 4)), color_with_alpha(outline, 0.25), false)
 
 	for ball in balls:
